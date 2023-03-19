@@ -1,0 +1,49 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cmake - debug",
+            "command": "cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Debug;cmake --build build -j8",
+            "type": "shell",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "cmake - release",
+            "command": "cmake -S. -Bbuild;cmake --build build -j8",
+            "type": "shell",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "cmake - clean",
+            "command": "cmake -S. -Bbuild; cmake --build build --target clean",
+            "type": "shell",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
