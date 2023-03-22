@@ -1,111 +1,140 @@
 #include <iostream>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <cstring>
 #include <unistd.h>
-#include <thread>
 #include <vector>
-#include <fstream>
-
 #include "ThreadPool.h"
+#include <chrono>
+#include <limits.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
-const int NUM_THREADS = std::thread::hardware_concurrency();
-const std::string OUTPUT_FILE_NAME = "Output/PacketsReceived_";
-std::vector<std::ofstream *> FILE_POOL;
-std::vector<ThreadPool *> THREAD_POOL;
-int TotalObjectReceived = 0;
+// Constants
+const unsigned short SERVER_PORT = 1234;
+const char *SERVER_IP_ADDRESS = "127.0.0.1";
+const int PACKET_SIZE = 8200;
+const char *FILENAME = "Output/UDP_OUT";
+const int NUMBER_OF_THREADS = std::thread::hardware_concurrency();
 
-void WriteToFile(int sockfd, int sequence)
+// Global variables
+int COLLECTION_SIZE = 0;
+std::vector<FILE *> FilePool;
+std::vector<ThreadPool *> myReaderPool;
+std::vector<ThreadPool *> myWriterPool;
+
+// Function declarations
+void WriteToFile(std::vector<char> *buffer, const int bytes, FILE *fp);
+void ThreadFunc(const int server_fd, const int file_no, const int size_to_collect);
+
+int main(int argc, char **argv)
 {
-    fd_set rfds;
-    struct timeval tv;
-    int retval;
 
-    /* Watch sockfd to see when it has input. */
-    FD_ZERO(&rfds);
-    FD_SET(sockfd, &rfds);
-
-    /* Wait up to five seconds. */
-    tv.tv_sec = 0;
-    tv.tv_usec = 2000;
-
-    retval = select(sockfd + 1, &rfds, NULL, NULL, &tv);
-    if (retval == -1)
+    // Check command line arguments
+    if (argc < 2)
     {
-        std::cerr << "Failed to call select()" << std::endl;
+        std::cout << "Usage: " << argv[0] << " [size in GB]" << std::endl;
+        return 1;
     }
-    else if (retval == 0)
+    COLLECTION_SIZE = std::atoi(argv[1]);
+
+    // Compute size to collect per thread
+    const long long size_to_collect = (1073741824 / NUMBER_OF_THREADS) * COLLECTION_SIZE;
+
+    std::cout << "Program will Collect " << COLLECTION_SIZE << " GB of data" << std::endl;
+
+    // Initialize file and thread pools
+    for (int i = 0; i < NUMBER_OF_THREADS; i++)
     {
-        std::cerr << "Timeout occurred" << std::endl;
+        FilePool.push_back(fopen((FILENAME + std::to_string(i) + ".bin").c_str(), "w+"));
+        myReaderPool.push_back(new ThreadPool(1));
+        myWriterPool.push_back(new ThreadPool(1));
+    }
+
+    // Create a UDP socket
+    int server_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (server_socket < 0)
+    {
+        std::cerr << "Error creating server socket" << std::endl;
+        return 1;
+    }
+
+    // Bind the socket to the specified port
+    struct sockaddr_in server_address;
+    std::memset(&server_address, 0, sizeof(server_address));
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_address.sin_port = htons(SERVER_PORT);
+    int bind_result = bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address));
+    if (bind_result < 0)
+    {
+        std::cerr << "Error binding server socket to port" << std::endl;
+        close(server_socket);
+        return 1;
     }
     else
     {
-        if (FD_ISSET(sockfd, &rfds))
-        {
-            // Socket is ready to read
-            char buffer[8200];
-            int bytes = recv(sockfd, buffer, sizeof(buffer), 0);
-            if (bytes < 0)
-            {
-                std::cerr << "Failed to receive packet" << std::endl;
-                close(sockfd);
-                return;
-            }
-            // Process the received data
-            FILE_POOL[sequence]->write(buffer, bytes);
-        }
+        std::cerr << "Connected to Socket. Now collecting data......" << std::endl;
     }
+
+    /// Get the current time
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    // Start threads to collect data
+    for (int i = 0; i < NUMBER_OF_THREADS; i++)
+    {
+        myReaderPool[i]->enqueue(ThreadFunc, server_socket, i, size_to_collect);
+    }
+
+    // Wait for threads to finish
+    for (int i = 0; i < NUMBER_OF_THREADS; i++)
+    {
+        delete myReaderPool[i];
+    }
+
+    // Close the socket
+    close(server_socket);
+
+    // Get the current time again
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration_seconds = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
+    // Print the duration in seconds
+    std::cout << "Duration: " << duration_seconds << " seconds to finish reading" << std::endl;
+
+    std::cout << "Data collection ended. Now finishing saving of data......" << std::endl;
+
+    // Wait for data writing to be finished
+    for (int i = 0; i < NUMBER_OF_THREADS; i++)
+    {
+        delete myWriterPool[i];
+        fclose(FilePool[i]);
+    }
+
+    // Calculate how much time taken to save the data
+    std::cout << "Saved the data. Now closing the Program. " << std::endl;
+    end_time = std::chrono::high_resolution_clock::now();
+    duration_seconds = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
+
+    // Print the duration in seconds
+    std::cout << "Duration: " << duration_seconds << " seconds to complete writing" << std::endl;
+
+    return 0;
 }
 
-int main()
+void WriteToFile(std::vector<char> *buffer, const int bytes, FILE *fp)
 {
-    std::cout << "number of available threads " << NUM_THREADS << std::endl;
+    fwrite(buffer->data(), bytes, 1, fp);
+    delete buffer;
+}
 
-    for (int i = 0; i < NUM_THREADS; i++)
+void ThreadFunc(const int server_fd, const int FileNo, const int SizeToCollect)
+{
+    long long total_bytes_by_Thread = 0;
+
+    while (total_bytes_by_Thread < SizeToCollect)
     {
-        FILE_POOL.push_back(new std::ofstream(OUTPUT_FILE_NAME + std::to_string(i) + ".bin", std::ios_base::app | std::ios_base::out));
-        THREAD_POOL.push_back(new ThreadPool(1));
+        std::vector<char> *buffer = new std::vector<char>(8200);
+        int bytes = recv(server_fd, buffer->data(), 8200, 0);
+        myWriterPool[FileNo]->enqueue(WriteToFile, buffer, bytes, FilePool[FileNo]);
+        total_bytes_by_Thread += bytes;
     }
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-    if (sockfd < 0)
-    {
-        std::cerr << "Failed to create socket" << std::endl;
-        return 1;
-    }
-
-    int port = 1234;
-    struct sockaddr_in addr = {0};
-    addr.sin_family = AF_INET;
-    // Replace INADDR_ANY with the IP address of the server
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    addr.sin_port = htons(port);
-
-    if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-    {
-        std::cerr << "Failed to bind socket" << std::endl;
-        close(sockfd);
-        return 1;
-    }
-
-    int sequence_number;
-
-    while (TotalObjectReceived < 1309441)
-    {
-        sequence_number = TotalObjectReceived % NUM_THREADS;
-        THREAD_POOL[sequence_number]->enqueue(WriteToFile, sockfd, sequence_number);
-        TotalObjectReceived++;
-        std::cout << TotalObjectReceived << std::endl;
-    }
-
-    for (int i = 0; i < NUM_THREADS; i++)
-    {
-        THREAD_POOL[i]->wait();
-        std::cout << "Theead " << i << " is Done!" << std::endl;
-        FILE_POOL[i]->close();
-    }
-
-    close(sockfd);
-    return 0;
 }

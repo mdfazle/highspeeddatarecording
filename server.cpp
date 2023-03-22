@@ -27,11 +27,13 @@ int main()
     int total_data_size = packet_size * num_packets;
 
     char buffer[packet_size];
-    memset(buffer, 'A', packet_size);
+
+    int j = 0;
 
     // Send UDP packets until desired amount of data has been sent
-    while (n < 1000000000)
+    while (true)
     {
+        memset(buffer, j, packet_size);
         int bytes_sent = sendto(sockfd, buffer, packet_size, 0,
                                 (struct sockaddr *)&addr, sizeof(addr));
         if (bytes_sent < 0)
@@ -41,6 +43,7 @@ int main()
             return 1;
         }
         n += bytes_sent;
+        j++;
     }
 
     close(sockfd);

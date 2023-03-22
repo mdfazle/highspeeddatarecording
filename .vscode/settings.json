@@ -89,7 +89,8 @@
         "random": "cpp",
         "strstream": "cpp",
         "typeindex": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "filesystem": "cpp"
     },
     "editor.formatOnPaste": true,
     "editor.formatOnType": true,
