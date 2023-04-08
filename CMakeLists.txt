@@ -25,7 +25,7 @@ set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${MAIN_PROJECT_DIR}/bin )
 
 
 add_executable(Server server.cpp)
-add_executable(Client client.cpp ThreadPool.cpp)
+add_executable(Client client.cpp ThreadPool/ThreadPool.cpp)
 add_executable(ClientBoost Client_boost.cpp)
 
 # Link to the pthread library
