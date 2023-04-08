@@ -90,7 +90,8 @@
         "strstream": "cpp",
         "typeindex": "cpp",
         "valarray": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "__verbose_abort": "cpp"
     },
     "editor.formatOnPaste": true,
     "editor.formatOnType": true,

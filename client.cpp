@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <mutex>
 
 // Constants
 const unsigned short SERVER_PORT = 1234;
@@ -21,10 +22,14 @@ int COLLECTION_SIZE = 0;
 std::vector<FILE *> FilePool;
 std::vector<ThreadPool *> myReaderPool;
 std::vector<ThreadPool *> myWriterPool;
+int MESSAGE_COUNTER = 0;
+
+std::mutex CounterMTX;
 
 // Function declarations
-void WriteToFile(std::vector<char> *buffer, const int bytes, FILE *fp);
+void WriteToFile(std::vector<char> *buffer, std::vector<char> Header, const int bytes, FILE *fp);
 void ThreadFunc(const int server_fd, const int file_no, const int size_to_collect);
+void intToCharArray(const int &value, std::vector<char> &result);
 
 int main(int argc, char **argv)
 {
@@ -120,8 +125,9 @@ int main(int argc, char **argv)
     return 0;
 }
 
-void WriteToFile(std::vector<char> *buffer, const int bytes, FILE *fp)
+void WriteToFile(std::vector<char> *buffer, std::vector<char> Header, const int bytes, FILE *fp)
 {
+    fwrite(Header.data(), Header.size(), 1, fp);
     fwrite(buffer->data(), bytes, 1, fp);
     delete buffer;
 }
@@ -132,9 +138,24 @@ void ThreadFunc(const int server_fd, const int FileNo, const int SizeToCollect)
 
     while (total_bytes_by_Thread < SizeToCollect)
     {
-        std::vector<char> *buffer = new std::vector<char>(8200);
-        int bytes = recv(server_fd, buffer->data(), 8200, 0);
-        myWriterPool[FileNo]->enqueue(WriteToFile, buffer, bytes, FilePool[FileNo]);
+        std::vector<char> *buffer = new std::vector<char>(PACKET_SIZE);
+        std::vector<char> HEADER_VECTOR{'a', 'b', 'c', 'd'};
+        CounterMTX.lock();
+        int currentCounter = MESSAGE_COUNTER;
+        int bytes = recv(server_fd, buffer->data(), PACKET_SIZE, 0);
+        MESSAGE_COUNTER++;
+        CounterMTX.unlock();
+        std::vector<char> MESSAGE_CNT(sizeof(int));
+        intToCharArray(currentCounter, MESSAGE_CNT);
+        HEADER_VECTOR.insert(HEADER_VECTOR.end(), MESSAGE_CNT.begin(), MESSAGE_CNT.end());
+        myWriterPool[FileNo]
+            ->enqueue(WriteToFile, buffer, HEADER_VECTOR, buffer->size(), FilePool[FileNo]);
         total_bytes_by_Thread += bytes;
     }
+}
+
+void intToCharArray(const int &value, std::vector<char> &result)
+{
+    result.resize(sizeof(int) / sizeof(char));
+    std::memcpy(result.data(), reinterpret_cast<const char *>(&value), sizeof(int));
 }
